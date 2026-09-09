@@ -3,19 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <title>Локальный запуск моей ONNX модели</title>
-    <!-- Подключаем наш обновленный локальный файл -->
+    <!-- Мы используем исключительно локальный файл, обходя все ограничения GitHub -->
     <script src="./ort.min.js"></script>
     
     <script type="module">
         let session;
-        
-        // Укажите ваши классы СТРОГО в алфавитном порядке (из dls.vocab в Jupyter Notebook)
+        // Ваши три класса строго в алфавитном порядке dls.vocab вашей модели
         const LABELS = ["dombra", "violin", "yurta"]; 
 
         async function init() {
             try {
                 document.getElementById('status').innerText = "Загрузка вашей ONNX модели...";
-                // Инициализируем локальную сессию
+                // Инициализируем локальный движок Microsoft
                 session = await ort.InferenceSession.create('./onnx_test_model.onnx');
                 document.getElementById('status').innerText = "Модель успешно загружена! Выберите картинку.";
             } catch (e) {
@@ -49,7 +48,7 @@
 
         async function process(event) {
             const file = event.target.files;
-            if (!file) return;
+            if (!file || file.length === 0) return;
 
             const img = document.getElementById('preview');
             img.src = URL.createObjectURL(file[0]);
@@ -61,13 +60,19 @@
                 
                 try {
                     const inputTensor = imageToTensor(img);
-                    const feeds = { input: inputTensor };
+                    
+                    // Передаем тензор в первый входной слой вашей fastai модели
+                    const inputName = session.inputNames[0];
+                    const feeds = { [inputName]: inputTensor };
                     
                     // Запуск вычислений
                     const results = await session.run(feeds);
-                    const output = results['output'].data; 
+                    
+                    // Считываем имя выходного слоя динамически
+                    const outputName = session.outputNames[0];
+                    const output = results[outputName].data; 
 
-                    // Поиск максимального значения (Argmax) среди 3-х элементов
+                    // Алгоритм поиска максимальной вероятности (Argmax) среди реальных весов
                     let maxIdx = 0;
                     let maxVal = output[0];
                     for(let i = 1; i < output.length; i++) {
@@ -78,7 +83,7 @@
                     }
 
                     document.getElementById('status').innerText = "Анализ завершен!";
-                    document.getElementById('result').innerText = `Результат: ${LABELS[maxIdx]}`;
+                    document.getElementById('result').innerText = `Результат: ${LABELS[maxIdx] || "Неизвестно"}`;
                 } catch (err) {
                     document.getElementById('status').innerText = "Ошибка вычислений: " + err.message;
                 }
