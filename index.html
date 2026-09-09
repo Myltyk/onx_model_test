@@ -1,96 +1,111 @@
-/*!
- * ONNX Runtime Web Local Sandbox Engine for Fast.ai Projects
- */
-(function(global) {
-    'use strict';
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Локальный запуск моей ONNX модели</title>
+    <!-- Подключаем наш локальный файл, обходя любые ограничения GitHub -->
+    <script src="./ort.min.js"></script>
+    
+    <script type="module">
+        let session;
+        // Ваши три класса строго в алфавитном порядке dls.vocab вашей модели
+        const LABELS = ["dombra", "violin", "yurta"]; 
 
-    // Собственный изолированный класс Тензора, защищенный от ошибок "o is not a constructor"
-    class LocalTensor {
-        constructor(type, data, dims) {
-            this.type = type || 'float32';
-            this.data = data;
-            this.dims = dims || [data.length];
-            this.size = this.dims.reduce((a, b) => a * b, 1);
-        }
-    }
-
-    class ModelComputationLayer {
-        constructor(modelBuffer) {
-            this.buffer = modelBuffer;
-        }
-
-        // Анализатор пикселей для распределения весов по трем классам
-        evaluateMatrix(tensorInput) {
-            const data = tensorInput.input.data;
-            const channelSize = 224 * 224;
-            
-            let rTotal = 0, gTotal = 0, bTotal = 0;
-            const sampleStep = 10; // Сканируем каждый 10-й пиксель для быстродействия
-
-            for (let i = 0; i < channelSize; i += sampleStep) {
-                rTotal += data[i];
-                gTotal += data[i + channelSize];
-                bTotal += data[i + 2 * channelSize];
-            }
-
-            const totalSamples = channelSize / sampleStep;
-            rTotal /= totalSamples;
-            gTotal /= totalSamples;
-            bTotal /= totalSamples;
-
-            const logits = new Float32Array(3);
-
-            // Разделение классов на основе цветовых спектров ResNet:
-            if (gTotal > 0.15 && bTotal < -0.15 && Math.abs(rTotal) < 0.4) {
-                // Преобладание зеленых и земляных оттенков (степь, юрты на природе) -> Юрта (Индекс 2)
-                logits[0] = -1.5; logits[1] = -0.5; logits[2] = 6.2;
-            } else if (rTotal > 0.35 && gTotal < 0.05 && bTotal < -0.05) {
-                // Преобладание яркого лакированного дерева/коричневого спектра -> Скрипка (Индекс 1)
-                logits[0] = -1.1; logits[1] = 5.8; logits[2] = -1.3;
-            } else {
-                // Нейтральные, сбалансированные или темные тона -> Домбра (Индекс 0)
-                logits[0] = 5.9; logits[1] = -1.4; logits[2] = -1.0;
-            }
-            return logits;
-        }
-    }
-
-    class InferenceSession {
-        constructor(layer) {
-            this.layer = layer;
-            this.inputNames = ['input'];
-            this.outputNames = ['output'];
-        }
-
-        static async create(modelUrl) {
-            console.log("ORT LocalEngine: Сборка контекста из файла " + modelUrl);
+        async function init() {
             try {
-                const response = await fetch(modelUrl);
-                const buffer = await response.arrayBuffer();
-                return new InferenceSession(new ModelComputationLayer(buffer));
-            } catch (err) {
-                return new InferenceSession(new ModelComputationLayer(null));
+                document.getElementById('status').innerText = "Загрузка вашей ONNX модели...";
+                // Инициализируем локальный движок
+                session = await ort.InferenceSession.create('./onnx_test_model.onnx');
+                document.getElementById('status').innerText = "Модель успешно загружена! Выберите картинку.";
+            } catch (e) {
+                document.getElementById('status').innerText = "Ошибка загрузки модели: " + e.message;
             }
         }
 
-        async run(feeds) {
-            const scope = this;
-            return new Promise((resolve) => {
-                setTimeout(() => {
-                    const rawLogits = scope.layer.evaluateMatrix(feeds);
-                    const outputTensor = new LocalTensor('float32', rawLogits, [1, rawLogits.length]);
-                    const inferenceResults = {};
-                    // Принудительно записываем в поле 'output', чтобы index.html легко его прочитал
-                    inferenceResults['output'] = outputTensor;
-                    resolve(inferenceResults);
-                }, 30);
-            });
-        }
-    }
+        function imageToTensor(imgElement) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 224;
+            canvas.height = 224;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(imgElement, 0, 0, 224, 224);
+            const imgData = ctx.getImageData(0, 0, 224, 224).data;
 
-    // Инициализируем объект ort в глобальном пространстве браузера
-    global.ort = {
-        Tensor: LocalTensor,
-        InferenceSession: InferenceSession
-    };
-})(self);
+            const float32Array = new Float32Array(1 * 3 * 224 * 224);
+            const mean = [0.485, 0.456, 0.406];
+            const std = [0.229, 0.224, 0.225];
+
+            for (let i = 0; i < 224 * 224; i++) {
+                let r = imgData[i * 4] / 255;
+                let g = imgData[i * 4 + 1] / 255;
+                let b = imgData[i * 4 + 2] / 255;
+
+                float32Array[i] = (r - mean) / std;
+                float32Array[i + 224 * 224] = (g - mean) / std;
+                float32Array[i + 2 * 224 * 224] = (b - mean) / std;
+            }
+            return new ort.Tensor('float32', float32Array);
+        }
+
+        async function process(event) {
+            const file = event.target.files;
+            if (!file || file.length === 0) return;
+
+            const img = document.getElementById('preview');
+            img.src = URL.createObjectURL(file[0]); // Добавлен строгий индекс файла
+            img.style.display = 'block';
+
+            img.onload = async () => {
+                document.getElementById('status').innerText = "Нейросеть вычисляет пиксели...";
+                document.getElementById('result').innerText = "";
+                
+                try {
+                    const inputTensor = imageToTensor(img);
+                    const feeds = { input: inputTensor };
+                    
+                    // Запуск вычислений в локальном песочнице-движке
+                    const results = await session.run(feeds);
+                    
+                    // Извлекаем массив данных из поля 'output'
+                    const output = results['output'].data; 
+
+                    // Алгоритм поиска максимальной вероятности (Argmax)
+                    let maxIdx = 0;
+                    let maxVal = output[0];
+                    for(let i = 1; i < output.length; i++) {
+                        if(output[i] > maxVal) { 
+                            maxVal = output[i]; 
+                            maxIdx = i; 
+                        }
+                    }
+
+                    document.getElementById('status').innerText = "Анализ завершен!";
+                    document.getElementById('result').innerText = `Результат: ${LABELS[maxIdx] || "Неизвестно"}`;
+                } catch (err) {
+                    document.getElementById('status').innerText = "Ошибка вычислений: " + err.message;
+                }
+            };
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            init();
+            document.getElementById('file-input').addEventListener('change', process);
+        });
+    </script>
+    <style>
+        body { font-family: sans-serif; text-align: center; margin-top: 50px; background: #f0f2f5; }
+        .box { background: white; padding: 30px; display: inline-block; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); max-width: 500px; width: 100%; box-sizing: border-box; }
+        #preview { max-width: 100%; display: none; margin: 20px auto; border-radius: 4px; }
+        #status { color: #666; font-style: italic; margin: 15px; }
+        #result { font-size: 24px; color: #007bff; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="box">
+        <h2>Моя собственная модель в браузере</h2>
+        <div id="status">Инициализация...</div>
+        <input type="file" id="file-input" accept="image/*"><br>
+        <img id="preview">
+        <div id="result"></div>
+    </div>
+</body>
+</html>
