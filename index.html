@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Локальный запуск моей ONNX модели</title>
+    <!-- Подключаем официальный движок ONNX Runtime Web -->
+    <script src="https://jsdelivr.net"></script>
+    
+    <script type="module">
+        let session;
+        // Замените на ваши классы в том порядке, в котором они были в dls.vocab вашей модели
+        const LABELS = ["Dog", "Cat"]; 
+
+        // Инициализация модели
+        async function init() {
+            try {
+                document.getElementById('status').innerText = "Загрузка вашей ONNX модели...";
+                // Загружаем файл вашей модели, лежащий в этой же папке
+                session = await ort.InferenceSession.create('./onnx_test_model.onnx');
+                document.getElementById('status').innerText = "Модель успешно загружена! Выберите картинку.";
+            } catch (e) {
+                document.getElementById('status').innerText = "Ошибка загрузки модели: " + e.message;
+            }
+        }
+
+        // Вспомогательная функция перевода пикселей в тензор (Формат fastai: Нормализация ImageNet)
+        function imageToTensor(imgElement) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 224;
+            canvas.height = 224;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(imgElement, 0, 0, 224, 224);
+            const imgData = ctx.getImageData(0, 0, 224, 224).data;
+
+            const float32Array = new Float32Array(1 * 3 * 224 * 224);
+            
+            // Стандартная нормализация fastai (ImageNet: mean & std)
+            const mean = [0.485, 0.456, 0.406];
+            const std = [0.229, 0.224, 0.225];
+
+            for (let i = 0; i < 224 * 224; i++) {
+                let r = imgData[i * 4] / 255;
+                let g = imgData[i * 4 + 1] / 255;
+                let b = imgData[i * 4 + 2] / 255;
+
+                // Записываем каналы R, G, B раздельно (формат NCHW для PyTorch)
+                float32Array[i] = (r - mean[0]) / std[0];
+                float32Array[i + 224 * 224] = (g - mean[1]) / std[1];
+                float32Array[i + 2 * 224 * 224] = (b - mean[2]) / std[2];
+            }
+            return new ort.Tensor('float32', float32Array, [1, 3, 224, 224]);
+        }
+
+        async function process(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const img = document.getElementById('preview');
+            img.src = URL.createObjectURL(file);
+            img.style.display = 'block';
+
+            img.onload = async () => {
+                document.getElementById('status').innerText = "Нейросеть вычисляет пиксели...";
+                
+                // 1. Превращаем картинку в тензор
+                const inputTensor = imageToTensor(img);
+                
+                // 2. Запускаем инференс прямо на процессоре пользователя
+                const feeds = { input: inputTensor };
+                const results = await session.run(feeds);
+                const output = results.output.data; // Получаем логиты
+
+                // 3. Находим самый вероятный класс (Argmax)
+                let maxIdx = 0;
+                let maxVal = output[0];
+                for(let i = 1; i < output.length; i++) {
+                    if(output[i] > maxVal) { maxVal = output[i]; maxIdx = i; }
+                }
+
+                document.getElementById('status').innerText = "Анализ завершен!";
+                document.getElementById('result').innerText = `Результат: ${LABELS[maxIdx]}`;
+            };
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            init();
+            document.getElementById('file-input').addEventListener('change', process);
+        });
+    </script>
+    <style>
+        body { font-family: sans-serif; text-align: center; margin-top: 50px; background: #f0f2f5; }
+        .box { background: white; padding: 30px; display: inline-block; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        #preview { max-width: 300px; display: none; margin: 20px auto; border-radius: 4px; }
+        #status { color: #666; font-style: italic; margin: 15px; }
+        #result { font-size: 24px; color: #007bff; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="box">
+        <h2>Моя собственная модель в браузере</h2>
+        <div id="status">Инициализация...</div>
+        <input type="file" id="file-input" accept="image/*"><br>
+        <img id="preview">
+        <div id="result"></div>
+    </div>
+</body>
+</html>
