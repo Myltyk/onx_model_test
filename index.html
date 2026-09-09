@@ -4,23 +4,20 @@
     <meta charset="UTF-8">
     <title>Локальный запуск моей ONNX модели</title>
     
-    <!-- Подключаем ОФИЦИАЛЬНЫЙ и полный движок ONNX Runtime Web напрямую со стабильного сервера -->
-    <script src="https://jsdelivr.net"></script>
-    
     <script type="module">
+        // Мы импортируем ОФИЦИАЛЬНУЮ библиотеку напрямую как JS-модуль.
+        // Этот способ официально разрешен в GitHub Pages и полностью обходит любые блокировки!
+        import * as ort from 'https://unpkg.com';
+
         let session;
-        
-        // ВНИМАНИЕ: Укажите ваши 3 класса строго в том алфавитном порядке, 
-        // в каком они обучались в Python (свойство dls.vocab вашей модели).
-        // Например: ["dombra", "violin", "yurta"]
+        // Укажите ваши три класса в алфавитном порядке dls.vocab вашей модели
         const LABELS = ["dombra", "violin", "yurta"]; 
 
         async function init() {
             try {
                 document.getElementById('status').innerText = "Загрузка вашей ONNX модели...";
                 
-                // Принудительно заставляем движок работать в режиме WASM на процессоре браузера
-                // Это гарантирует стабильность и обходит любые ошибки видеокарт
+                // Принудительно запускаем вычисления на процессоре (WASM)
                 session = await ort.InferenceSession.create('./onnx_test_model.onnx', { executionProviders: ['wasm'] });
                 
                 document.getElementById('status').innerText = "Модель успешно загружена! Выберите картинку.";
@@ -29,7 +26,6 @@
             }
         }
 
-        // Преобразование картинки в формат тензора (ImageNet нормализация fastai)
         function imageToTensor(imgElement) {
             const canvas = document.createElement('canvas');
             canvas.width = 224;
@@ -47,15 +43,15 @@
                 let g = imgData[i * 4 + 1] / 255;
                 let b = imgData[i * 4 + 2] / 255;
 
-                float32Array[i] = (r - mean[0]) / std[0];
-                float32Array[i + 224 * 224] = (g - mean[1]) / std[1];
-                float32Array[i + 2 * 224 * 224] = (b - mean[2]) / std[2];
+                float32Array[i] = (r - mean) / std;
+                float32Array[i + 224 * 224] = (g - mean) / std;
+                float32Array[i + 2 * 224 * 224] = (b - mean) / std;
             }
             return new ort.Tensor('float32', float32Array, [1, 3, 224, 224]);
         }
 
         async function process(event) {
-            const file = event.target.files[0];
+            const file = event.target.files;
             if (!file) return;
 
             const img = document.getElementById('preview');
@@ -69,18 +65,18 @@
                 try {
                     const inputTensor = imageToTensor(img);
                     
-                    // Динамически считываем имя входного слоя вашей модели fastai (обычно 'input' или 'images')
+                    // Автоматически подставляем имя входного слоя вашей fastai-модели
                     const inputName = session.inputNames[0];
                     const feeds = { [inputName]: inputTensor };
                     
                     // Запуск НАСТОЯЩИХ вычислений на ваших весах
                     const results = await session.run(feeds);
                     
-                    // Динамически считываем имя выходного слоя
+                    // Получаем выходной слой предсказаний
                     const outputName = session.outputNames[0];
                     const output = results[outputName].data; 
 
-                    // Алгоритм Argmax: ищем класс с максимальной вероятностью из всех доступных
+                    // Поиск индекса максимального значения (Argmax) среди реального массива весов
                     let maxIdx = 0;
                     let maxVal = output[0];
                     for(let i = 1; i < output.length; i++) {
