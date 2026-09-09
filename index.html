@@ -52,7 +52,7 @@
             if (!file) return;
 
             const img = document.getElementById('preview');
-            img.src = URL.createObjectURL(file);
+            img.src = URL.createObjectURL(file[0]);
             img.style.display = 'block';
 
             img.onload = async () => {
