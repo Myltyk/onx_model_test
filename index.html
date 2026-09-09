@@ -13,9 +13,10 @@
         // Обязательно сохраните косую черту "/" в конце ссылки.
         const COLAB_API_URL = "https://1689b116e80a29f98f.gradio.live"; 
 
-        async function process(event) {
-            const file = event.target.files[0]; // Берем первый выбранный файл
-            if (!file) return;
+           async function process(event) {
+            const files = event.target.files;
+            if (!files || files.length === 0) return;
+            const file = files[0]; // Строго извлекаем первый файл из списка
 
             // Показываем превью картинки на сайте
             const img = document.getElementById('preview');
@@ -26,25 +27,34 @@
             document.getElementById('result').innerText = "";
 
             try {
-                // Подключаемся по API к вашему запущенному Google Colab
+                // Подключаемся к вашему бесплатному серверу в Colab
                 const app = await client(COLAB_API_URL);
                 
-                // Отправляем картинку в функцию предсказания (в Gradio это стандартный эндпоинт /predict)
+                // Передаем файл как Blob-объект, как того требует официальный API-клиент Gradio
                 const result = await app.predict("/predict", [ file ]);
                 
-                // Считываем словарь вероятностей, который вернул Python
+                // В новых версиях Gradio ответ лежит строго в массиве result.data[0]
                 const confidences = result.data[0];
                 
-                // Алгоритм поиска самого вероятного класса
                 let highestClass = "";
                 let highestProb = -1;
                 
+                // Перебираем полученные веса предсказаний классов
                 for (const [className, probValue] of Object.entries(confidences)) {
                     if (probValue > highestProb) {
                         highestProb = probValue;
                         highestClass = className;
                     }
                 }
+
+                document.getElementById('status').innerText = "Анализ завершен!";
+                document.getElementById('result').innerText = `Результат: ${highestClass} (${(highestProb * 100).toFixed(1)}%)`;
+            } catch (err) {
+                console.error(err);
+                document.getElementById('status').innerText = "Ошибка вычислений или связи с Colab.";
+            }
+        }
+
 
                 document.getElementById('status').innerText = "Анализ завершен!";
                 document.getElementById('result').innerText = `Результат: ${highestClass} (${(highestProb * 100).toFixed(1)}%)`;
